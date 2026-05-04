@@ -1,10 +1,100 @@
 import os
-from flask import Flask, render_template_string, jsonify
+import threading
+import requests
+from datetime import datetime, timezone
+from collections import defaultdict
+from flask import Flask, render_template_string, jsonify, request
 from mcstatus import JavaServer
 
 app = Flask(__name__)
 
 SERVER_HOST = "burmalcraft.sosal.today"
+VISIT_WEBHOOK = "https://discord.com/api/webhooks/1500785730065006642/5kViChCUcdeVHcq9Wot2fP-Vx1-pxNhcNFdwbnVopVfMkeVIlE11BNfYt5_HXPa4hnkv"
+
+# --- Трекинг посещений ---
+visit_lock = threading.Lock()
+visits = []          # список всех визитов: {ip, time, ua, path}
+known_ips = set()    # уже виденные IP (для оповещения о новых)
+
+def get_client_ip():
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+def send_webhook(payload: dict):
+    try:
+        requests.post(VISIT_WEBHOOK, json=payload, timeout=5)
+    except Exception:
+        pass
+
+def send_new_visitor_alert(ip: str, ua: str, path: str, ts: datetime):
+    send_webhook({"embeds": [{
+        "title": "🆕 Новый посетитель",
+        "color": 0x5865F2,
+        "fields": [
+            {"name": "IP", "value": f"`{ip}`", "inline": True},
+            {"name": "Страница", "value": path, "inline": True},
+            {"name": "User-Agent", "value": ua[:200] or "—", "inline": False},
+        ],
+        "footer": {"text": "BurmalCraft Analytics"},
+        "timestamp": ts.isoformat()
+    }]})
+
+def send_hourly_report():
+    threading.Timer(3600, send_hourly_report).start()
+    with visit_lock:
+        total = len(visits)
+        unique = len({v["ip"] for v in visits})
+        last_10 = visits[-10:]
+
+    if total == 0:
+        send_webhook({"embeds": [{
+            "title": "📊 Почасовой отчёт — BurmalCraft",
+            "description": "За этот час посещений не было.",
+            "color": 0x99AAB5,
+            "footer": {"text": "BurmalCraft Analytics"},
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }]})
+        return
+
+    rows = "\n".join(
+        f"`{v['ip']}` — {v['path']} [{v['time'].strftime('%H:%M:%S')}]"
+        for v in last_10
+    )
+    send_webhook({"embeds": [{
+        "title": "📊 Почасовой отчёт — BurmalCraft",
+        "color": 0x57F287,
+        "fields": [
+            {"name": "Всего визитов", "value": str(total), "inline": True},
+            {"name": "Уникальных IP", "value": str(unique), "inline": True},
+            {"name": "Последние 10 визитов", "value": rows or "—", "inline": False},
+        ],
+        "footer": {"text": "BurmalCraft Analytics"},
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }]})
+
+# Запуск первого часового отчёта
+threading.Timer(3600, send_hourly_report).start()
+
+@app.before_request
+def track_visit():
+    # Игнорируем API-запросы и статику
+    if request.path.startswith("/api/"):
+        return
+    ip = get_client_ip()
+    ua = request.headers.get("User-Agent", "")
+    path = request.path
+    ts = datetime.now(timezone.utc)
+    entry = {"ip": ip, "time": ts, "ua": ua, "path": path}
+    is_new = False
+    with visit_lock:
+        visits.append(entry)
+        if ip not in known_ips:
+            known_ips.add(ip)
+            is_new = True
+    if is_new:
+        threading.Thread(target=send_new_visitor_alert, args=(ip, ua, path, ts), daemon=True).start()
 
 @app.route('/api/players')
 def api_players():
