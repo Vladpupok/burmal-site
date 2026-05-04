@@ -2,25 +2,66 @@ import os
 import threading
 import requests
 from datetime import datetime, timezone
-from collections import defaultdict
-from flask import Flask, render_template_string, jsonify, request
+from flask import Flask, render_template_string, jsonify, request, Response
 from mcstatus import JavaServer
 
 app = Flask(__name__)
 
 SERVER_HOST = "burmalcraft.sosal.today"
 VISIT_WEBHOOK = "https://discord.com/api/webhooks/1500785730065006642/5kViChCUcdeVHcq9Wot2fP-Vx1-pxNhcNFdwbnVopVfMkeVIlE11BNfYt5_HXPa4hnkv"
+AUDIT_PASSWORD = "burmal2024"
 
-# --- Трекинг посещений ---
+BOT_UA_KEYWORDS = [
+    'bot', 'crawler', 'spider', 'scraper', 'wget', 'curl', 'python-requests',
+    'go-http', 'java/', 'libwww', 'httpclient', 'axios', 'node-fetch',
+    'googlebot', 'bingbot', 'yandexbot', 'duckduckbot', 'baiduspider',
+    'facebookexternalhit', 'twitterbot', 'rogerbot', 'semrushbot', 'ahrefsbot'
+]
+
 visit_lock = threading.Lock()
-visits = []          # список всех визитов: {ip, time, ua, path}
-known_ips = set()    # уже виденные IP (для оповещения о новых)
+visits = []
+known_ips = set()
+
 
 def get_client_ip():
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
+    for header in ('X-Forwarded-For', 'X-Real-IP', 'CF-Connecting-IP'):
+        val = request.headers.get(header)
+        if val:
+            return val.split(',')[0].strip()
+    return request.remote_addr or 'unknown'
+
+
+def classify_ip(ip: str, ua: str) -> dict:
+    ua_lower = ua.lower()
+    for kw in BOT_UA_KEYWORDS:
+        if kw in ua_lower:
+            return {'type': 'bot', 'label': '🤖 Бот', 'country': '—', 'city': '—', 'isp': '—'}
+
+    if ip in ('127.0.0.1', 'localhost', '::1') or ip.startswith('10.') or ip.startswith('172.') or ip.startswith('192.168.'):
+        return {'type': 'local', 'label': '🏠 Локальный', 'country': '—', 'city': '—', 'isp': 'Replit/Local'}
+
+    try:
+        r = requests.get(
+            f'http://ip-api.com/json/{ip}?fields=status,country,city,isp,proxy,hosting,mobile',
+            timeout=4
+        )
+        d = r.json()
+        if d.get('status') == 'success':
+            country = d.get('country', '—')
+            city = d.get('city', '—')
+            isp = d.get('isp', '—')
+            if d.get('hosting'):
+                return {'type': 'datacenter', 'label': '🏢 Дата-центр/VPN', 'country': country, 'city': city, 'isp': isp}
+            if d.get('proxy'):
+                return {'type': 'vpn', 'label': '🔒 Прокси/VPN', 'country': country, 'city': city, 'isp': isp}
+            if d.get('mobile'):
+                return {'type': 'mobile', 'label': '📱 Мобильный', 'country': country, 'city': city, 'isp': isp}
+            return {'type': 'real', 'label': '👤 Реальный', 'country': country, 'city': city, 'isp': isp}
+    except Exception:
+        pass
+
+    return {'type': 'unknown', 'label': '❓ Неизвестно', 'country': '—', 'city': '—', 'isp': '—'}
+
 
 def send_webhook(payload: dict):
     try:
@@ -28,73 +69,208 @@ def send_webhook(payload: dict):
     except Exception:
         pass
 
-def send_new_visitor_alert(ip: str, ua: str, path: str, ts: datetime):
-    send_webhook({"embeds": [{
-        "title": "🆕 Новый посетитель",
-        "color": 0x5865F2,
-        "fields": [
-            {"name": "IP", "value": f"`{ip}`", "inline": True},
-            {"name": "Страница", "value": path, "inline": True},
-            {"name": "User-Agent", "value": ua[:200] or "—", "inline": False},
+
+def handle_new_visitor(ip, ua, path, ts, info):
+    send_webhook({'embeds': [{
+        'title': '🆕 Новый посетитель — BurmalCraft',
+        'color': 0x5865F2,
+        'fields': [
+            {'name': 'IP',              'value': f'`{ip}`',                          'inline': True},
+            {'name': 'Тип',             'value': info['label'],                       'inline': True},
+            {'name': 'Страна / Город',  'value': f"{info['country']} / {info['city']}", 'inline': True},
+            {'name': 'ISP',             'value': info['isp'][:100],                  'inline': True},
+            {'name': 'Страница',        'value': path,                               'inline': True},
+            {'name': 'User-Agent',      'value': ua[:200] or '—',                    'inline': False},
         ],
-        "footer": {"text": "BurmalCraft Analytics"},
-        "timestamp": ts.isoformat()
+        'footer': {'text': 'BurmalCraft Analytics'},
+        'timestamp': ts.isoformat()
     }]})
+
 
 def send_hourly_report():
     threading.Timer(3600, send_hourly_report).start()
     with visit_lock:
-        total = len(visits)
-        unique = len({v["ip"] for v in visits})
-        last_10 = visits[-10:]
+        total  = len(visits)
+        unique = len({v['ip'] for v in visits})
+        real   = sum(1 for v in visits if v['info']['type'] == 'real')
+        bots   = sum(1 for v in visits if v['info']['type'] == 'bot')
+        vpns   = sum(1 for v in visits if v['info']['type'] in ('vpn', 'datacenter'))
+        mobile = sum(1 for v in visits if v['info']['type'] == 'mobile')
+        last   = visits[-10:]
 
     if total == 0:
-        send_webhook({"embeds": [{
-            "title": "📊 Почасовой отчёт — BurmalCraft",
-            "description": "За этот час посещений не было.",
-            "color": 0x99AAB5,
-            "footer": {"text": "BurmalCraft Analytics"},
-            "timestamp": datetime.now(timezone.utc).isoformat()
+        send_webhook({'embeds': [{
+            'title': '📊 Почасовой отчёт — BurmalCraft',
+            'description': 'За этот час посещений не было.',
+            'color': 0x99AAB5,
+            'footer': {'text': 'BurmalCraft Analytics'},
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }]})
         return
 
-    rows = "\n".join(
-        f"`{v['ip']}` — {v['path']} [{v['time'].strftime('%H:%M:%S')}]"
-        for v in last_10
+    rows = '\n'.join(
+        f"`{v['ip']}` {v['info']['label']} — {v['path']} [{v['time'].strftime('%H:%M:%S')}]"
+        for v in last
     )
-    send_webhook({"embeds": [{
-        "title": "📊 Почасовой отчёт — BurmalCraft",
-        "color": 0x57F287,
-        "fields": [
-            {"name": "Всего визитов", "value": str(total), "inline": True},
-            {"name": "Уникальных IP", "value": str(unique), "inline": True},
-            {"name": "Последние 10 визитов", "value": rows or "—", "inline": False},
+    send_webhook({'embeds': [{
+        'title': '📊 Почасовой отчёт — BurmalCraft',
+        'color': 0x57F287,
+        'fields': [
+            {'name': 'Всего визитов',   'value': str(total),  'inline': True},
+            {'name': 'Уникальных IP',   'value': str(unique), 'inline': True},
+            {'name': '👤 Реальных',     'value': str(real),   'inline': True},
+            {'name': '🤖 Ботов',        'value': str(bots),   'inline': True},
+            {'name': '🔒 VPN/DC',       'value': str(vpns),   'inline': True},
+            {'name': '📱 Мобильных',    'value': str(mobile), 'inline': True},
+            {'name': 'Последние 10',    'value': rows or '—', 'inline': False},
         ],
-        "footer": {"text": "BurmalCraft Analytics"},
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        'footer': {'text': 'BurmalCraft Analytics'},
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }]})
 
-# Запуск первого часового отчёта
+
 threading.Timer(3600, send_hourly_report).start()
+
 
 @app.before_request
 def track_visit():
-    # Игнорируем API-запросы и статику
-    if request.path.startswith("/api/"):
+    if request.path.startswith('/api/') or request.path.startswith('/audit'):
         return
-    ip = get_client_ip()
-    ua = request.headers.get("User-Agent", "")
+    ip   = get_client_ip()
+    ua   = request.headers.get('User-Agent', '')
     path = request.path
-    ts = datetime.now(timezone.utc)
-    entry = {"ip": ip, "time": ts, "ua": ua, "path": path}
+    ts   = datetime.now(timezone.utc)
+    info = {'type': 'pending', 'label': '⏳ Определяется...', 'country': '—', 'city': '—', 'isp': '—'}
+    entry = {'ip': ip, 'time': ts, 'ua': ua, 'path': path, 'info': info}
     is_new = False
     with visit_lock:
         visits.append(entry)
         if ip not in known_ips:
             known_ips.add(ip)
             is_new = True
-    if is_new:
-        threading.Thread(target=send_new_visitor_alert, args=(ip, ua, path, ts), daemon=True).start()
+
+    def resolve(entry, ip, ua, path, ts, is_new):
+        resolved = classify_ip(ip, ua)
+        entry['info'] = resolved
+        if is_new:
+            handle_new_visitor(ip, ua, path, ts, resolved)
+
+    threading.Thread(target=resolve, args=(entry, ip, ua, path, ts, is_new), daemon=True).start()
+
+
+# ─── Аудит-журнал ────────────────────────────────────────────────────────────
+
+AUDIT_HTML = '''<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Аудит — BurmalCraft</title>
+<style>
+  body{margin:0;background:#0d0d0d;color:#e0e0e0;font-family:'Segoe UI',sans-serif;padding:20px;}
+  h1{color:#ffdf91;text-align:center;margin-bottom:4px;font-size:1.6rem;}
+  .sub{text-align:center;color:#888;font-size:13px;margin-bottom:20px;}
+  .stats{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:24px;}
+  .stat{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:12px 20px;text-align:center;min-width:100px;}
+  .stat-val{font-size:24px;font-weight:bold;color:#ffdf91;}
+  .stat-label{font-size:11px;color:#888;margin-top:2px;}
+  .table-wrap{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{background:#1e1e1e;color:#ffdf91;padding:10px 12px;text-align:left;border-bottom:2px solid #333;white-space:nowrap;}
+  tbody tr{border-bottom:1px solid #1e1e1e;transition:background 0.15s;}
+  tbody tr:hover{background:#1a1a1a;}
+  td{padding:8px 12px;vertical-align:top;word-break:break-all;}
+  .badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap;}
+  .badge-real      {background:#1a4a1a;color:#55ff55;border:1px solid #2a6a2a;}
+  .badge-bot       {background:#4a1a1a;color:#ff5555;border:1px solid #6a2a2a;}
+  .badge-vpn       {background:#2a2a4a;color:#7799ff;border:1px solid #3a3a6a;}
+  .badge-datacenter{background:#2a2a4a;color:#aabbff;border:1px solid #3a3a6a;}
+  .badge-mobile    {background:#1a3a4a;color:#55ccff;border:1px solid #2a5a6a;}
+  .badge-local     {background:#333;   color:#aaa;   border:1px solid #555;}
+  .badge-unknown   {background:#2a2a1a;color:#aaa;   border:1px solid #4a4a2a;}
+  .badge-pending   {background:#1a1a1a;color:#888;   border:1px solid #333;}
+  .ua{font-size:11px;color:#777;max-width:260px;}
+  .refresh{text-align:center;margin-bottom:16px;}
+  .refresh a{color:#ffdf91;text-decoration:none;border:1px solid #5a3a00;border-radius:6px;padding:6px 16px;font-size:13px;}
+  .refresh a:hover{background:#2a1800;}
+  .new-badge{background:#2a3a1a;color:#88ff88;border:1px solid #3a5a2a;margin-left:6px;
+             font-size:10px;padding:1px 5px;border-radius:4px;font-weight:600;}
+</style>
+</head>
+<body>
+<h1>🛡️ Журнал аудита</h1>
+<div class="sub">BurmalCraft · Все посещения сайта · Обновляется при перезагрузке</div>
+<div class="refresh"><a href="/audit?key={{ key }}">🔄 Обновить</a></div>
+<div class="stats">
+  <div class="stat"><div class="stat-val">{{ total }}</div><div class="stat-label">Всего визитов</div></div>
+  <div class="stat"><div class="stat-val">{{ unique }}</div><div class="stat-label">Уникальных IP</div></div>
+  <div class="stat"><div class="stat-val" style="color:#55ff55">{{ real }}</div><div class="stat-label">👤 Реальных</div></div>
+  <div class="stat"><div class="stat-val" style="color:#ff5555">{{ bots }}</div><div class="stat-label">🤖 Ботов</div></div>
+  <div class="stat"><div class="stat-val" style="color:#7799ff">{{ vpns }}</div><div class="stat-label">🔒 VPN/DC</div></div>
+  <div class="stat"><div class="stat-val" style="color:#55ccff">{{ mobile }}</div><div class="stat-label">📱 Мобильных</div></div>
+</div>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>#</th><th>Время (UTC)</th><th>IP</th><th>Тип</th><th>Страна</th><th>Город</th><th>ISP</th><th>Страница</th><th>User-Agent</th></tr>
+  </thead>
+  <tbody>
+  {% for v in rows %}
+    <tr>
+      <td style="color:#555">{{ v.n }}</td>
+      <td style="white-space:nowrap;color:#888">{{ v.time }}</td>
+      <td><code>{{ v.ip }}</code>{% if v.is_new %}<span class="new-badge">NEW</span>{% endif %}</td>
+      <td><span class="badge badge-{{ v.info.type }}">{{ v.info.label }}</span></td>
+      <td>{{ v.info.country }}</td>
+      <td>{{ v.info.city }}</td>
+      <td style="max-width:150px;font-size:12px;color:#aaa">{{ v.info.isp }}</td>
+      <td><code>{{ v.path }}</code></td>
+      <td class="ua">{{ v.ua[:120] }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+</body>
+</html>'''
+
+
+@app.route('/audit')
+def audit():
+    if request.args.get('key', '') != AUDIT_PASSWORD:
+        return Response('403 Forbidden', status=403, mimetype='text/plain')
+
+    with visit_lock:
+        snap = list(visits)
+
+    seen = set()
+    rows = []
+    for i, v in enumerate(reversed(snap), 1):
+        is_new = v['ip'] not in seen
+        seen.add(v['ip'])
+        rows.append({
+            'n':      len(snap) - i + 1,
+            'time':   v['time'].strftime('%Y-%m-%d %H:%M:%S'),
+            'ip':     v['ip'],
+            'ua':     v['ua'],
+            'path':   v['path'],
+            'info':   v['info'],
+            'is_new': is_new,
+        })
+
+    total  = len(snap)
+    unique = len({v['ip'] for v in snap})
+    real   = sum(1 for v in snap if v['info']['type'] == 'real')
+    bots   = sum(1 for v in snap if v['info']['type'] == 'bot')
+    vpns   = sum(1 for v in snap if v['info']['type'] in ('vpn', 'datacenter'))
+    mobile = sum(1 for v in snap if v['info']['type'] == 'mobile')
+
+    return render_template_string(AUDIT_HTML,
+        key=request.args.get('key'), rows=rows,
+        total=total, unique=unique, real=real, bots=bots, vpns=vpns, mobile=mobile)
+
+
+# ─── API игроков ──────────────────────────────────────────────────────────────
 
 @app.route('/api/players')
 def api_players():
@@ -105,7 +281,9 @@ def api_players():
     except Exception:
         return jsonify({"online": 0, "max": 50, "status": "offline", "version": "—"})
 
-# ОБНОВЛЕННЫЙ АДАПТИВНЫЙ ДИЗАЙН
+
+# ─── Главная страница (оригинальный дизайн) ───────────────────────────────────
+
 HTML = '''
 <!DOCTYPE html>
 <html lang="ru">
@@ -204,12 +382,12 @@ HTML = '''
             text-shadow: 2px 2px 0px #000;
         }
 
-        .tagline { 
-            font-size: 14px; 
-            color: rgba(255,255,255,0.7); 
-            margin: 10px 0 20px; 
-            min-height: 20px; 
-            font-style: italic; 
+        .tagline {
+            font-size: 14px;
+            color: rgba(255,255,255,0.7);
+            margin: 10px 0 20px;
+            min-height: 20px;
+            font-style: italic;
         }
 
         .online-status {
@@ -257,9 +435,8 @@ HTML = '''
             font-size: 14px;
         }
 
-        .btn-play { background: var(--mc-gold); color: #3d2919; }
         .btn-discord { background: #5865F2; color: white; border-bottom-color: #3b44a3; }
-        .btn-donate { background: #ff4d4d; color: white; border-bottom-color: #b33030; }
+        .btn-donate  { background: #ff4d4d; color: white; border-bottom-color: #b33030; }
 
         .btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
 
@@ -332,6 +509,7 @@ HTML = '''
             color: #aaa;
             margin-top: 4px;
         }
+
         /* Видео-оверлей */
         .win-overlay {
             display: none;
@@ -438,7 +616,6 @@ HTML = '''
     </div>
 
     <script>
-        // Скрипты остаются без изменений, так как они логически верны
         const symbols = ['⚔️','💎','🏆','🌟','🍀','💀','🔥','🎯'];
         const reels = [0,1,2].map(i => document.getElementById('i'+i));
         let spinning = false;
@@ -647,9 +824,11 @@ HTML = '''
 </html>
 '''
 
+
 @app.route('/')
 def index():
     return render_template_string(HTML)
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
