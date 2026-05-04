@@ -39,14 +39,17 @@ HTML = '''
     <style>
         :root {
             --sky-top: #1a1a2e;
-            --sky-bottom: #f62e46;
+            --sky-mid: #16213e;
+            --sky-bottom: #0f3460;
             --gold: #fccf31;
+            --sunset: #f62e46;
         }
 
         body {
-            background: linear-gradient(180deg, #020111 0%, #191621 40%, #4a304d 100%);
+            /* Тот самый глубокий закатный градиент */
+            background: linear-gradient(180deg, #020111 0%, #191621 35%, #20202c 50%, #4a304d 70%, #ffedbc 100%);
             color: white;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
             display: flex;
             justify-content: center;
@@ -55,50 +58,102 @@ HTML = '''
             overflow: hidden;
         }
 
-        .card {
-            background: rgba(0, 0, 0, 0.6);
-            padding: 2rem;
-            border-radius: 20px;
-            border: 2px solid var(--gold);
+        .container {
             text-align: center;
-            backdrop-filter: blur(10px);
-            box-shadow: 0 0 30px rgba(252, 207, 49, 0.2);
-            animation: spawn 0.8s cubic-bezier(0.17, 0.89, 0.32, 1.49);
+            z-index: 10;
+            animation: fadeIn 1.5s ease-out;
         }
 
-        @keyframes spawn {
-            from { transform: translateY(50px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        h1 { color: var(--gold); margin-bottom: 0.5rem; }
-        .online-box { font-size: 1.5rem; margin: 1rem 0; }
-        .dot {
-            height: 12px; width: 12px;
-            background-color: #2ecc71;
+        .card {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 3rem;
+            border-radius: 30px;
+            border: 2px solid var(--gold);
+            backdrop-filter: blur(15px);
+            box-shadow: 0 0 50px rgba(246, 46, 70, 0.3);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: scale(1.02);
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin: 0;
+            background: linear-gradient(to bottom, var(--gold), #f39c12);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-transform: uppercase;
+            letter-spacing: 5px;
+            filter: drop-shadow(0 0 10px rgba(252, 207, 49, 0.5));
+        }
+
+        .status-box {
+            margin-top: 20px;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .online-count {
+            font-weight: bold;
+            color: #2ecc71;
+            text-shadow: 0 0 10px rgba(46, 204, 113, 0.5);
+        }
+
+        .pulse-dot {
+            width: 12px;
+            height: 12px;
+            background: #2ecc71;
             border-radius: 50%;
-            display: inline-block;
-            margin-right: 10px;
             box-shadow: 0 0 10px #2ecc71;
-            animation: blink 1.5s infinite;
+            animation: pulse 2s infinite;
         }
 
-        @keyframes blink {
-            0% { opacity: 1; }
-            50% { opacity: 0.4; }
-            100% { opacity: 1; }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.5); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .ip-badge {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 10px 20px;
+            border-radius: 50px;
+            display: inline-block;
+            margin-top: 25px;
+            cursor: pointer;
+            border: 1px solid rgba(252, 207, 49, 0.3);
+            transition: all 0.3s;
+        }
+
+        .ip-badge:hover {
+            background: var(--gold);
+            color: black;
         }
     </style>
 </head>
 <body>
-    <div class="card">
-        <h1>BurmalCraft</h1>
-        <p>IP: burmalcraft.sosal.today</p>
-        <div class="online-box">
-            <span class="dot"></span>
-            Игроков на сервере: <span id="count">...</span>
+    <div class="container">
+        <div class="card">
+            <h1>BurmalCraft</h1>
+            <div class="status-box">
+                <div class="pulse-dot"></div>
+                <span>Игроков на сервере: <span class="online-count" id="count">...</span></span>
+            </div>
+            <div class="ip-badge" onclick="copyIP()">
+                IP: <span id="ip-text">burmalcraft.sosal.today</span>
+            </div>
+            <p style="margin-top: 15px; color: #ccc; font-size: 0.9rem;">Версия: <span id="ver">загрузка...</span></p>
         </div>
-        <p style="color: #aaa;">Версия: <span id="ver">загрузка...</span></p>
     </div>
 
     <script>
@@ -109,9 +164,16 @@ HTML = '''
                 document.getElementById('count').innerText = data.online + ' / ' + data.max;
                 document.getElementById('ver').innerText = data.version;
             } catch {
-                document.getElementById('count').innerText = "Ошибка";
+                document.getElementById('count').innerText = "OFFLINE";
             }
         }
+
+        function copyIP() {
+            const ip = document.getElementById('ip-text').innerText;
+            navigator.clipboard.writeText(ip);
+            alert('IP скопирован!');
+        }
+
         setInterval(updateStats, 5000);
         updateStats();
     </script>
