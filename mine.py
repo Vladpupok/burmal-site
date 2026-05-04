@@ -15,31 +15,27 @@ def api_players():
     except Exception:
         return jsonify({"online": 0, "max": 50, "status": "offline", "version": "—"})
 
-# ОБНОВЛЕННЫЙ АДАПТИВНЫЙ ДИЗАЙН
 HTML = '''
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BurmalCraft | Закат на сервере</title>
-    <link rel="icon" type="image/png" href="https://cdn.discordapp.com/attachments/1209502089210757141/1500758633301151744/content.png?ex=69f999e4&is=69f84864&hm=d14f95bc8d53d659f1f801649fd1fa89c8e38179a6b1cec382823c8b5192d311&">
+    <title>BurmalCraft | Slots Edition</title>
+    <link rel="icon" type="image/png" href="https://cdn.discordapp.com/attachments/1209502089210757141/1500758633301151744/content.png">
     
     <style>
         :root {
             --sky-top: #151530;
             --sky-mid: #ff5e3a;
             --sky-bottom: #fccb90;
-            --card-bg: rgba(20, 10, 30, 0.85);
+            --card-bg: rgba(20, 10, 30, 0.9);
             --mc-gold: #ffdf91;
-            --mc-dirt: #3d2919;
-            --mc-green: #2d5a27;
+            --mc-border: #5d4d2d;
+            --jackpot-color: #00ffff;
         }
 
-        * {
-            box-sizing: border-box;
-        }
-
+        * { box-sizing: border-box; }
         body {
             background: linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 60%, var(--sky-bottom) 100%);
             color: white;
@@ -49,189 +45,178 @@ HTML = '''
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            overflow-x: hidden;
-            position: relative;
+            overflow: hidden;
         }
 
-        .sun {
-            position: absolute;
-            width: 80px;
-            height: 80px;
-            background: #fff;
-            bottom: 20%;
-            left: 10%;
-            border-radius: 50%;
-            box-shadow: 0 0 50px var(--sky-mid), 0 0 100px #fff;
-            animation: sunPulse 4s infinite alternate ease-in-out;
-            z-index: 1;
-        }
-
-        @keyframes sunPulse {
-            from { transform: scale(1); opacity: 0.8; }
-            to { transform: scale(1.1); opacity: 1; }
-        }
-
-        .cloud {
-            position: absolute;
-            background: rgba(255, 255, 255, 0.15);
-            border-radius: 50px;
-            animation: moveClouds 45s infinite linear;
-        }
-        .c1 { width: 150px; height: 30px; top: 10%; }
-        .c2 { width: 100px; height: 20px; top: 25%; animation-duration: 60s; animation-delay: -10s; }
-
-        @keyframes moveClouds {
-            from { left: -200px; }
-            to { left: 110vw; }
-        }
-
+        /* КАРТОЧКА */
         .card {
             background: var(--card-bg);
-            backdrop-filter: blur(10px);
-            padding: 40px 20px;
-            border: 3px solid var(--mc-gold);
-            border-radius: 12px;
+            backdrop-filter: blur(15px);
+            padding: 30px 20px;
+            border: 4px solid var(--mc-gold);
+            border-radius: 15px;
             text-align: center;
             width: 90%;
             max-width: 420px;
             z-index: 10;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            box-shadow: 0 0 30px rgba(255, 223, 145, 0.2);
             animation: blockSpawn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            margin: 20px auto;
+        }
+
+        h1 { font-size: 32px; color: var(--mc-gold); text-shadow: 3px 3px 0 #000; margin: 0; }
+
+        /* ДИЗАЙН СЛОТ-МАШИНЫ */
+        .slot-machine-container {
+            background: #1a0f00;
+            border: 4px solid #3d2919;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            position: relative;
+            box-shadow: inset 0 0 15px #000;
+        }
+
+        .slot-machine {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .slot-reel {
+            width: 60px;
+            height: 60px;
+            background: #2a1a0a;
+            border: 3px solid var(--mc-gold);
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: inset 0 0 10px #000;
+        }
+
+        .slot-inner { display: flex; flex-direction: column; align-items: center; }
+        .slot-symbol { 
+            width: 60px; height: 60px; 
+            display: flex; align-items: center; justify-content: center; 
+            font-size: 30px; flex-shrink: 0; 
+        }
+
+        .slot-btn {
+            background: linear-gradient(to bottom, #ffdf91, #b38600);
+            color: #3d2919;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 25px;
+            font-weight: bold;
+            font-size: 18px;
+            cursor: pointer;
+            border-bottom: 4px solid #664d00;
+            transition: 0.1s;
+            width: 100%;
+        }
+
+        .slot-btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+        .slot-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* SUPER WIN OVERLAY */
+        #super-win-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            display: none; /* Скрыт по умолчанию */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .win-video {
+            width: 90%;
+            max-width: 600px;
+            border: 5px solid var(--mc-gold);
+            box-shadow: 0 0 50px var(--mc-gold);
+            border-radius: 10px;
+        }
+
+        .win-text {
+            font-size: 50px;
+            color: var(--mc-gold);
+            text-transform: uppercase;
+            margin-top: 20px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ffdf91;
+            animation: pulse 1s infinite;
+        }
+
+        .close-win-btn {
+            margin-top: 30px;
+            padding: 10px 30px;
+            background: white;
+            color: black;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
         }
 
         @keyframes blockSpawn {
-            0% { transform: scale(0.8) translateY(50px); opacity: 0; }
-            100% { transform: scale(1) translateY(0); opacity: 1; }
-        }
-
-        h1 {
-            font-size: clamp(28px, 8vw, 42px);
-            margin: 0;
-            color: var(--mc-gold);
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            text-shadow: 2px 2px 0px #000;
-        }
-
-        .tagline { 
-            font-size: 14px; 
-            color: rgba(255,255,255,0.7); 
-            margin: 10px 0 20px; 
-            min-height: 20px; 
-            font-style: italic; 
-        }
-
-        .online-status {
-            color: #55ff55;
-            font-family: monospace;
-            font-size: 16px;
-            margin: 10px 0 25px;
-            text-shadow: 0 0 10px rgba(85, 255, 85, 0.4);
-            animation: blink 2s infinite;
-        }
-
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
-        }
-
-        .ip-box {
-            background: rgba(0,0,0,0.4);
-            border: 2px dashed var(--mc-gold);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 25px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-
-        .ip-box:active { transform: scale(0.97); }
-
-        .ip-text {
-            font-size: 18px;
-            font-weight: bold;
-            word-break: break-all;
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
         }
 
         .btn {
-            display: block;
-            padding: 15px;
-            text-decoration: none;
-            font-weight: bold;
-            border-radius: 6px;
-            text-transform: uppercase;
-            transition: 0.2s;
-            margin-bottom: 12px;
-            border-bottom: 4px solid rgba(0,0,0,0.3);
-            font-size: 14px;
-        }
-
-        .btn-play { background: var(--mc-gold); color: #3d2919; }
-        .btn-discord { background: #5865F2; color: white; border-bottom-color: #3b44a3; }
-        .btn-donate { background: #ff4d4d; color: white; border-bottom-color: #b33030; }
-        
-        .btn:hover { transform: translateY(-2px); filter: brightness(1.1); }
-
-        .footer { margin-top: 25px; font-size: 10px; color: #bbb; letter-spacing: 1px; }
-
-        /* Игровой автомат */
-        .slot-machine { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 15px; }
-        .slot-reel { width: 44px; height: 44px; background: rgba(0,0,0,0.5); border: 2px solid var(--mc-gold); border-radius: 6px; overflow: hidden; position: relative; }
-        .slot-inner { display: flex; flex-direction: column; align-items: center; }
-        .slot-symbol { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
-        .slot-btn { background: var(--mc-gold); color: #3d2919; border: none; border-radius: 6px; padding: 10px 15px; font-weight: bold; cursor: pointer; border-bottom: 3px solid #b38600; }
-
-        #particles { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
-
-        /* Мобильные правки */
-        @media (max-width: 480px) {
-            .card { padding: 30px 15px; }
-            .sun { width: 60px; height: 60px; left: 5%; bottom: 15%; }
-            .btn { padding: 12px; font-size: 13px; }
+            display: block; padding: 15px; margin-top: 10px;
+            text-decoration: none; border-radius: 5px; font-weight: bold;
+            text-transform: uppercase; color: white;
+            background: #5865F2; border-bottom: 4px solid #3b44a3;
         }
     </style>
 </head>
 <body>
 
-    <canvas id="particles"></canvas>
-    <div class="sun"></div>
-    <div class="cloud c1"></div>
-    <div class="cloud c2"></div>
+    <div id="super-win-overlay">
+        <img class="win-video" src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExNHJmZGRmZ3R4Z3R4Z3R4Z3R4Z3R4Z3R4Z3R4Z3R4Z3R4Z3R4Z3R4JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/l41lTjJpfSQIbCc9y/giphy.gif" alt="Winner!">
+        <div class="win-text">SUPER JACKPOT!</div>
+        <button class="close-win-btn" onclick="closeWin()">ЗАБРАТЬ ПРИЗ</button>
+    </div>
 
     <div class="card">
         <h1>BURMALCRAFT</h1>
-        <div class="tagline"><span id="tagline-text"></span><span class="cursor"></span></div>
-        <div class="online-status" id="player-count">● Подключение...</div>
+        <div id="player-count" style="margin: 10px 0; color: #55ff55; font-family: monospace;">● Загрузка...</div>
 
-        <div class="ip-box" onclick="copyIP()">
-            <div style="font-size: 9px; color: var(--mc-gold); margin-bottom: 5px; opacity: 0.8;">НАЖМИ, ЧТОБЫ СКОПИРОВАТЬ IP</div>
-            <div class="ip-text" id="ip">burmalcraft.sosal.today</div>
+        <div class="slot-machine-container">
+            <div class="slot-machine">
+                <div class="slot-reel" id="r0"><div class="slot-inner" id="i0"></div></div>
+                <div class="slot-reel" id="r1"><div class="slot-inner" id="i1"></div></div>
+                <div class="slot-reel" id="r2"><div class="slot-inner" id="i2"></div></div>
+            </div>
+            <button class="slot-btn" id="spin-btn" onclick="spinSlot()">КРУТИТЬ</button>
         </div>
 
-        <div class="slot-machine">
-            <div class="slot-reel" id="r0"><div class="slot-inner" id="i0"></div></div>
-            <div class="slot-reel" id="r1"><div class="slot-inner" id="i1"></div></div>
-            <div class="slot-reel" id="r2"><div class="slot-inner" id="i2"></div></div>
-            <button class="slot-btn" onclick="spinSlot()">▶</button>
-        </div>
-        <div id="slot-win" style="font-size: 11px; margin-bottom: 15px; min-height: 15px; font-family: monospace;"></div>
+        <div id="slot-status" style="min-height: 20px; font-size: 14px; margin-bottom: 10px;"></div>
 
-        <a href="https://discord.gg/FePmE3pQZ" target="_blank" class="btn btn-discord">Наш Discord</a>
-        <a href="https://destream.net/live/zemaks999" target="_blank" class="btn btn-donate">❤ Задонатить</a>
-
-        <div class="footer">VERSION <span id="server-version">...</span> | BURMALCRAFT 2024</div>
+        <a href="https://discord.gg/FePmE3pQZ" target="_blank" class="btn">DISCORD СЕРВЕРА</a>
     </div>
 
     <script>
-        // Скрипты остаются без изменений, так как они логически верны
-        const symbols = ['⚔️','💎','🏆','🌟','🍀','💀','🔥','🎯'];
+        const symbols = ['💎','⚔️','🍎','🔥','💀','🌟','🍀'];
         const reels = [0,1,2].map(i => document.getElementById('i'+i));
+        const spinBtn = document.getElementById('spin-btn');
         let spinning = false;
 
         function buildReel(el) {
             el.innerHTML = '';
-            const extended = [...symbols, ...symbols, ...symbols];
+            // Создаем длинную ленту символов
+            const extended = [];
+            for(let i=0; i<40; i++) extended.push(symbols[Math.floor(Math.random()*symbols.length)]);
             extended.forEach(s => {
                 const div = document.createElement('div');
                 div.className = 'slot-symbol';
@@ -242,118 +227,76 @@ HTML = '''
         }
         reels.forEach(buildReel);
 
-        function spinReel(el, delay, finalIdx) {
-            return new Promise(resolve => {
-                const symHeight = 44;
-                const totalSyms = symbols.length;
-                const spins = 3;
-                const target = -(spins * totalSyms * symHeight + finalIdx * symHeight);
-                let pos = 0;
-                const speed = 12;
-
-                setTimeout(() => {
-                    function animate() {
-                        pos -= speed;
-                        if (pos <= target) {
-                            el.style.transform = `translateY(${-Math.abs(finalIdx * symHeight)}px)`;
-                            resolve(finalIdx);
-                            return;
-                        }
-                        el.style.transform = `translateY(${pos}px)`;
-                        requestAnimationFrame(animate);
-                    }
-                    requestAnimationFrame(animate);
-                }, delay);
-            });
-        }
-
         async function spinSlot() {
             if (spinning) return;
             spinning = true;
-            document.getElementById('slot-win').textContent = '';
+            spinBtn.disabled = true;
+            document.getElementById('slot-status').textContent = "Испытываем удачу...";
+
             const picks = [0,1,2].map(() => Math.floor(Math.random() * symbols.length));
-            await Promise.all([
-                spinReel(reels[0], 0,   picks[0]),
-                spinReel(reels[1], 200, picks[1]),
-                spinReel(reels[2], 400, picks[2]),
-            ]);
-            const winEl = document.getElementById('slot-win');
-            if (picks[0] === picks[1] && picks[1] === picks[2]) {
-                winEl.textContent = '🎉 ДЖЕКПОТ!';
-                winEl.style.color = '#ffdf91';
-            } else if (picks[0] === picks[1] || picks[1] === picks[2] || picks[0] === picks[2]) {
-                winEl.textContent = '✨ Почти!';
-                winEl.style.color = '#55ff55';
-            }
-            spinning = false;
-        }
-
-        // Частицы
-        const canvas = document.getElementById('particles');
-        const ctx = canvas.getContext('2d');
-        function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
-        window.addEventListener('resize', resize);
-        resize();
-
-        const particles = Array.from({length: 25}, () => ({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
-            size: Math.random() * 4 + 2,
-            speedY: -Math.random() * 0.5 - 0.2,
-            opacity: Math.random() * 0.5
-        }));
-
-        function draw() {
-            ctx.clearRect(0,0,canvas.width, canvas.height);
-            particles.forEach(p => {
-                ctx.fillStyle = `rgba(255, 223, 145, ${p.opacity})`;
-                ctx.fillRect(p.x, p.y, p.size, p.size);
-                p.y += p.speedY;
-                if (p.y < -10) p.y = canvas.height + 10;
+            
+            // Анимация кручения
+            const promises = reels.map((el, i) => {
+                return new Promise(resolve => {
+                    const time = 2000 + (i * 500);
+                    const targetY = -(30 * 60); // прокрутить 30 символов
+                    el.style.transition = `transform ${time}ms cubic-bezier(0.45, 0.05, 0.55, 0.95)`;
+                    el.style.transform = `translateY(${targetY}px)`;
+                    
+                    setTimeout(() => {
+                        el.style.transition = 'none';
+                        el.innerHTML = '';
+                        // Ставим выигрышный символ в центр
+                        const winSym = symbols[picks[i]];
+                        const div = document.createElement('div');
+                        div.className = 'slot-symbol';
+                        div.textContent = winSym;
+                        el.appendChild(div);
+                        el.style.transform = 'translateY(0px)';
+                        resolve(winSym);
+                    }, time);
+                });
             });
-            requestAnimationFrame(draw);
-        }
-        draw();
 
-        // Текст
-        const taglines = ['Лучший сервер для друзей', 'Строй. Сражайся. Побеждай.', 'Присоединяйся к нам!'];
-        let tIdx = 0, cIdx = 0, del = false;
-        function type() {
-            const full = taglines[tIdx];
-            document.getElementById('tagline-text').textContent = full.slice(0, cIdx);
-            if (!del && cIdx < full.length) cIdx++;
-            else if (del && cIdx > 0) cIdx--;
-            else { del = !del; if (!del) tIdx = (tIdx + 1) % taglines.length; }
-            setTimeout(type, del ? 50 : 100);
-        }
-        type();
+            const results = await Promise.all(promises);
 
-        // Статус
-        async function update() {
+            // ПРОВЕРКА ПОБЕДЫ
+            if (results[0] === results[1] && results[1] === results[2]) {
+                showSuperWin();
+            } else if (results[0] === results[1] || results[1] === results[2] || results[0] === results[2]) {
+                document.getElementById('slot-status').textContent = "✨ Малая победа!";
+                document.getElementById('slot-status').style.color = "#55ff55";
+            } else {
+                document.getElementById('slot-status').textContent = "Попробуй еще раз!";
+                document.getElementById('slot-status').style.color = "#aaa";
+            }
+
+            spinning = false;
+            spinBtn.disabled = false;
+            setTimeout(() => buildReel(reels[0]), 2000); // Сброс лент
+            reels.forEach(buildReel);
+        }
+
+        function showSuperWin() {
+            const overlay = document.getElementById('super-win-overlay');
+            overlay.style.display = 'flex';
+            // Если есть видео, можно запустить: document.querySelector('.win-video').play();
+        }
+
+        function closeWin() {
+            document.getElementById('super-win-overlay').style.display = 'none';
+        }
+
+        // Обновление онлайна
+        async function fetchStatus() {
             try {
                 const res = await fetch('/api/players');
-                const d = await res.json();
-                const el = document.getElementById('player-count');
-                document.getElementById('server-version').textContent = d.version;
-                if (d.status === 'online') {
-                    el.textContent = '● Игроков на сервере: ' + d.online + ' / ' + d.max;
-                    el.style.color = '#55ff55';
-                } else {
-                    el.textContent = '● Сервер Offline';
-                    el.style.color = '#ff5555';
-                }
-            } catch (e) {}
+                const data = await res.json();
+                document.getElementById('player-count').textContent = `● Игроков: ${data.online} / ${data.max}`;
+            } catch(e) {}
         }
-        update();
-        setInterval(update, 30000);
-
-        function copyIP() {
-            const ip = document.getElementById('ip');
-            navigator.clipboard.writeText(ip.innerText);
-            const old = ip.innerText;
-            ip.innerText = "СКОПИРОВАНО!";
-            setTimeout(() => ip.innerText = old, 1500);
-        }
+        setInterval(fetchStatus, 15000);
+        fetchStatus();
     </script>
 </body>
 </html>
