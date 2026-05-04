@@ -313,14 +313,23 @@ HTML = '''
 
         <div class="slot-wrap">
             <div class="slot-label">🎰 испытай удачу</div>
+            <input type="text" id="nickname-input" placeholder="Введи свой ник..." maxlength="32"
+                style="width:100%;box-sizing:border-box;background:#1a1008;border:2px solid #5a3a00;border-radius:8px;
+                color:#ffdf91;font-size:14px;padding:10px 14px;margin-bottom:10px;outline:none;
+                font-family:inherit;letter-spacing:0.5px;" />
             <div class="slot-machine">
                 <div class="slot-reel"><div class="slot-inner" id="i0"></div></div>
                 <div class="slot-reel"><div class="slot-inner" id="i1"></div></div>
                 <div class="slot-reel"><div class="slot-inner" id="i2"></div></div>
             </div>
+            <div id="chance-bar-wrap" style="width:100%;margin-top:8px;">
+                <div style="font-size:10px;color:#888;text-align:right;margin-bottom:2px;">шанс джекпота: <span id="chance-label">5%</span></div>
+                <div style="background:#1a1008;border-radius:4px;height:6px;overflow:hidden;border:1px solid #3a2200;">
+                    <div id="chance-bar" style="height:100%;width:5%;background:linear-gradient(90deg,#ff9900,#ffdf91);border-radius:4px;transition:width 0.5s;"></div>
+                </div>
+            </div>
             <div class="slot-controls">
                 <button class="slot-btn" id="slot-btn" onclick="spinSlot()">▶ КРУТИТЬ</button>
-                <button class="slot-btn" style="background:linear-gradient(145deg,#ff4d4d,#b33030);border-bottom-color:#6b0000;font-size:11px;padding:9px 12px;" onclick="spinSlot(true)">🎰 ТЕСТ</button>
             </div>
             <div class="slot-result" id="slot-win"></div>
         </div>
@@ -343,6 +352,38 @@ HTML = '''
         const symbols = ['⚔️','💎','🏆','🌟','🍀','💀','🔥','🎯'];
         const reels = [0,1,2].map(i => document.getElementById('i'+i));
         let spinning = false;
+        let jackpotChance = 0.05;
+        const WEBHOOK = 'https://discord.com/api/webhooks/1500775192425664512/ooLkNMiJOlvNlgjWgx3JrR3-akcEV5fcBfVbZERbyCMaQ2ee0bHVvTzHvWY4mEKfoYl3';
+
+        function updateChanceBar() {
+            const pct = Math.round(jackpotChance * 100);
+            document.getElementById('chance-label').textContent = pct + '%';
+            document.getElementById('chance-bar').style.width = Math.min(pct, 100) + '%';
+            const bar = document.getElementById('chance-bar');
+            if (pct >= 60) bar.style.background = 'linear-gradient(90deg,#ff4400,#ffaa00)';
+            else if (pct >= 30) bar.style.background = 'linear-gradient(90deg,#ff9900,#ffdf91)';
+            else bar.style.background = 'linear-gradient(90deg,#ff9900,#ffdf91)';
+        }
+
+        async function sendWinWebhook(nick) {
+            const name = nick.trim() || 'Аноним';
+            const payload = {
+                embeds: [{
+                    title: '🎰 ДЖЕКПОТ НА BURMALCRAFT! 🎉',
+                    description: `**${name}** сорвал джекпот в слот-машине!\n\n🏆 Все три символа совпали!\n\nЗаходи: \`burmalcraft.sosal.today\``,
+                    color: 0xFFD700,
+                    footer: { text: 'BurmalCraft Casino' },
+                    timestamp: new Date().toISOString()
+                }]
+            };
+            try {
+                await fetch(WEBHOOK, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } catch(e) {}
+        }
 
         function buildReel(el) {
             el.innerHTML = '';
@@ -382,32 +423,49 @@ HTML = '''
             });
         }
 
-        async function spinSlot(forceJackpot = false) {
+        async function spinSlot() {
             if (spinning) return;
             spinning = true;
             const btn = document.getElementById('slot-btn');
             btn.disabled = true;
             document.getElementById('slot-win').textContent = '';
+
+            const isJackpot = Math.random() < jackpotChance;
             const jackpotIdx = Math.floor(Math.random() * symbols.length);
-            const picks = forceJackpot
-                ? [jackpotIdx, jackpotIdx, jackpotIdx]
-                : [0,1,2].map(() => Math.floor(Math.random() * symbols.length));
+            let picks;
+            if (isJackpot) {
+                picks = [jackpotIdx, jackpotIdx, jackpotIdx];
+            } else {
+                do {
+                    picks = [0,1,2].map(() => Math.floor(Math.random() * symbols.length));
+                } while (picks[0] === picks[1] && picks[1] === picks[2]);
+            }
+
             await Promise.all([
                 spinReel(reels[0], 0,   picks[0]),
                 spinReel(reels[1], 220, picks[1]),
                 spinReel(reels[2], 440, picks[2]),
             ]);
+
             const winEl = document.getElementById('slot-win');
-            if (picks[0] === picks[1] && picks[1] === picks[2]) {
+            if (isJackpot) {
                 winEl.textContent = '🎉 ДЖЕКПОТ! ВСЕ СОВПАЛИ!';
                 winEl.style.color = '#ffdf91';
+                jackpotChance = 0.05;
+                updateChanceBar();
+                const nick = document.getElementById('nickname-input').value;
+                sendWinWebhook(nick);
                 setTimeout(showWinVideo, 400);
             } else if (picks[0] === picks[1] || picks[1] === picks[2] || picks[0] === picks[2]) {
                 winEl.textContent = '✨ Два совпали! Почти!';
                 winEl.style.color = '#55ff55';
+                jackpotChance = Math.min(jackpotChance + 0.07, 0.95);
+                updateChanceBar();
             } else {
                 winEl.textContent = 'Не повезло, крути ещё!';
                 winEl.style.color = '#888';
+                jackpotChance = Math.min(jackpotChance + 0.05, 0.95);
+                updateChanceBar();
             }
             spinning = false;
             btn.disabled = false;
