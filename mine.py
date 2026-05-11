@@ -19,38 +19,53 @@ BOT_UA_KEYWORDS = [
     'facebookexternalhit', 'twitterbot', 'rogerbot', 'semrushbot', 'ahrefsbot'
 ]
 
-VISITS_FILE = 'visits_log.json'
+VISITS_FILE = 'visits_log.jsonl'
 visit_lock = threading.Lock()
-visits = []
 known_ips = set()
 
 
-def load_visits():
-    global visits, known_ips
+def load_known_ips():
     if not os.path.exists(VISITS_FILE):
         return
     try:
         with open(VISITS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        for v in data:
-            v['time'] = datetime.fromisoformat(v['time'])
-            visits.append(v)
-            known_ips.add(v['ip'])
+            for line in f:
+                line = line.strip()
+                if line:
+                    v = json.loads(line)
+                    known_ips.add(v.get('ip', ''))
     except Exception:
         pass
 
 
-def save_visit(entry: dict):
+def append_visit(entry: dict):
+    try:
+        record = {**entry, 'time': entry['time'].isoformat()}
+        with visit_lock:
+            with open(VISITS_FILE, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    except Exception:
+        pass
+
+
+def read_all_visits() -> list:
+    result = []
+    if not os.path.exists(VISITS_FILE):
+        return result
     try:
         with visit_lock:
-            snap = [
-                {**v, 'time': v['time'].isoformat()}
-                for v in visits
-            ]
-        with open(VISITS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(snap, f, ensure_ascii=False)
+            with open(VISITS_FILE, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            v = json.loads(line)
+            v['time'] = datetime.fromisoformat(v['time'])
+            result.append(v)
     except Exception:
         pass
+    return result
 
 
 def get_client_ip():
@@ -119,14 +134,14 @@ def handle_new_visitor(ip, ua, path, ts, info):
 
 def send_hourly_report():
     threading.Timer(3600, send_hourly_report).start()
-    with visit_lock:
-        total  = len(visits)
-        unique = len({v['ip'] for v in visits})
-        real   = sum(1 for v in visits if v['info']['type'] == 'real')
-        bots   = sum(1 for v in visits if v['info']['type'] == 'bot')
-        vpns   = sum(1 for v in visits if v['info']['type'] in ('vpn', 'datacenter'))
-        mobile = sum(1 for v in visits if v['info']['type'] == 'mobile')
-        last   = visits[-10:]
+    snap   = read_all_visits()
+    total  = len(snap)
+    unique = len({v['ip'] for v in snap})
+    real   = sum(1 for v in snap if v.get('info', {}).get('type') == 'real')
+    bots   = sum(1 for v in snap if v.get('info', {}).get('type') == 'bot')
+    vpns   = sum(1 for v in snap if v.get('info', {}).get('type') in ('vpn', 'datacenter'))
+    mobile = sum(1 for v in snap if v.get('info', {}).get('type') == 'mobile')
+    last   = snap[-10:]
 
     if total == 0:
         send_webhook({'embeds': [{
@@ -159,35 +174,32 @@ def send_hourly_report():
     }]})
 
 
-load_visits()
+load_known_ips()
 threading.Timer(3600, send_hourly_report).start()
 
 
 @app.before_request
 def track_visit():
-    if request.path.startswith('/api/') or request.path.startswith('/audit'):
+    if request.path.startswith('/api/') or request.path.startswith('/audit') or request.path.startswith('/static/'):
         return
     ip   = get_client_ip()
     ua   = request.headers.get('User-Agent', '')
     path = request.path
     ts   = datetime.now(timezone.utc)
-    info = {'type': 'pending', 'label': '⏳ Определяется...', 'country': '—', 'city': '—', 'isp': '—'}
-    entry = {'ip': ip, 'time': ts, 'ua': ua, 'path': path, 'info': info}
     is_new = False
     with visit_lock:
-        visits.append(entry)
         if ip not in known_ips:
             known_ips.add(ip)
             is_new = True
 
-    def resolve(entry, ip, ua, path, ts, is_new):
+    def resolve(ip, ua, path, ts, is_new):
         resolved = classify_ip(ip, ua)
-        entry['info'] = resolved
-        save_visit(entry)
+        entry = {'ip': ip, 'time': ts, 'ua': ua, 'path': path, 'info': resolved}
+        append_visit(entry)
         if is_new:
             handle_new_visitor(ip, ua, path, ts, resolved)
 
-    threading.Thread(target=resolve, args=(entry, ip, ua, path, ts, is_new), daemon=True).start()
+    threading.Thread(target=resolve, args=(ip, ua, path, ts, is_new), daemon=True).start()
 
 
 # ─── Аудит-журнал ────────────────────────────────────────────────────────────
@@ -272,8 +284,7 @@ def audit():
     if request.args.get('key', '') != AUDIT_PASSWORD:
         return Response('403 Forbidden', status=403, mimetype='text/plain')
 
-    with visit_lock:
-        snap = list(visits)
+    snap = read_all_visits()
 
     seen = set()
     rows = []
